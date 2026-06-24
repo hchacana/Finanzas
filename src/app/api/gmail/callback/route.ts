@@ -9,8 +9,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const userId = "default";
-    await exchangeCode(code, userId);
+    await exchangeCode(code);
     return NextResponse.redirect(
       new URL("/dashboard?gmail=connected", request.url)
     );

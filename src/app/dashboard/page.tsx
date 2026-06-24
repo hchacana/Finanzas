@@ -7,15 +7,16 @@ import {
   Mail,
   TrendingUp,
   AlertCircle,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 
 type Transaction = {
   id: string;
-  amount: number;
-  merchant: string;
-  card_last4: string;
-  transaction_date: string;
-  created_at: string;
+  fecha: string;
+  monto: number;
+  comercio: string;
+  tarjeta: string;
 };
 
 type FinanzasData = {
@@ -29,10 +30,14 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currentDate, setCurrentDate] = useState(new Date());
 
   const fetchData = useCallback(async () => {
+    setLoading(true);
     try {
-      const res = await fetch("/api/finanzas");
+      const res = await fetch(
+        `/api/finanzas?month=${currentDate.getMonth()}&year=${currentDate.getFullYear()}`
+      );
       if (!res.ok) throw new Error("Error al cargar datos");
       const json = await res.json();
       setData(json);
@@ -42,7 +47,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentDate]);
 
   useEffect(() => {
     fetchData();
@@ -69,6 +74,14 @@ export default function DashboardPage() {
     }
   }
 
+  function changeMonth(delta: number) {
+    setCurrentDate((prev) => {
+      const d = new Date(prev);
+      d.setMonth(d.getMonth() + delta);
+      return d;
+    });
+  }
+
   function formatCLP(amount: number) {
     return new Intl.NumberFormat("es-CL", {
       style: "currency",
@@ -88,11 +101,25 @@ export default function DashboardPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">
-            Gastos del Mes
-          </h2>
-          <p className="text-gray-500 capitalize">{data?.month}</p>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => changeMonth(-1)}
+            className="p-2 hover:bg-gray-100 rounded-lg"
+          >
+            <ChevronLeft className="h-5 w-5 text-gray-600" />
+          </button>
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900">
+              Gastos del Mes
+            </h2>
+            <p className="text-gray-500 capitalize">{data?.month}</p>
+          </div>
+          <button
+            onClick={() => changeMonth(1)}
+            className="p-2 hover:bg-gray-100 rounded-lg"
+          >
+            <ChevronRight className="h-5 w-5 text-gray-600" />
+          </button>
         </div>
         <div className="flex gap-3">
           <a
@@ -175,9 +202,10 @@ export default function DashboardPage() {
         {data?.transactions.length === 0 ? (
           <div className="p-12 text-center text-gray-500">
             <Mail className="h-12 w-12 mx-auto mb-4 text-gray-300" />
-            <p className="font-medium">Sin transacciones aún</p>
+            <p className="font-medium">Sin transacciones este mes</p>
             <p className="text-sm mt-1">
-              Conecta tu Gmail y sincroniza para ver tus gastos
+              Conecta tu Gmail y sincroniza, o configura Zapier para recibir
+              compras automaticamente
             </p>
           </div>
         ) : (
@@ -202,24 +230,21 @@ export default function DashboardPage() {
               {data?.transactions.map((tx) => (
                 <tr key={tx.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 text-sm text-gray-600">
-                    {new Date(tx.transaction_date).toLocaleDateString(
-                      "es-CL",
-                      {
-                        day: "2-digit",
-                        month: "short",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      }
-                    )}
+                    {new Date(tx.fecha).toLocaleDateString("es-CL", {
+                      day: "2-digit",
+                      month: "short",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
                   </td>
                   <td className="px-6 py-4 text-sm font-medium text-gray-900">
-                    {tx.merchant}
+                    {tx.comercio}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-500">
-                    ****{tx.card_last4}
+                    ****{tx.tarjeta}
                   </td>
                   <td className="px-6 py-4 text-sm font-semibold text-gray-900 text-right">
-                    {formatCLP(tx.amount)}
+                    {formatCLP(tx.monto)}
                   </td>
                 </tr>
               ))}

@@ -1,5 +1,4 @@
 import { google } from "googleapis";
-import { supabase } from "./supabase";
 
 const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
@@ -15,46 +14,75 @@ export function getAuthUrl() {
   });
 }
 
-export async function exchangeCode(code: string, userId: string) {
+export async function exchangeCode(code: string) {
   const { tokens } = await oauth2Client.getToken(code);
 
-  await supabase.from("gmail_tokens").upsert({
-    user_id: userId,
-    access_token: tokens.access_token,
-    refresh_token: tokens.refresh_token,
-    expiry: tokens.expiry_date
-      ? new Date(tokens.expiry_date).toISOString()
-      : null,
+  const sheets = google.sheets({
+    version: "v4",
+    auth: new google.auth.GoogleAuth({
+      credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY || "{}"),
+      scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+    }),
+  });
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: process.env.GOOGLE_SHEET_ID!,
+    range: "Tokens!A1:C1",
+    valueInputOption: "RAW",
+    requestBody: {
+      values: [[
+        tokens.access_token || "",
+        tokens.refresh_token || "",
+        tokens.expiry_date?.toString() || "",
+      ]],
+    },
   });
 
   return tokens;
 }
 
-export async function getGmailClient(userId: string) {
-  const { data } = await supabase
-    .from("gmail_tokens")
-    .select("*")
-    .eq("user_id", userId)
-    .single();
+export async function getGmailClient() {
+  const sheets = google.sheets({
+    version: "v4",
+    auth: new google.auth.GoogleAuth({
+      credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY || "{}"),
+      scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+    }),
+  });
 
-  if (!data) throw new Error("No Gmail tokens found");
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: process.env.GOOGLE_SHEET_ID!,
+    range: "Tokens!A1:C1",
+  });
+
+  const row = res.data.values?.[0];
+  if (!row?.[0]) throw new Error("No Gmail tokens found. Conecta tu Gmail primero.");
 
   oauth2Client.setCredentials({
-    access_token: data.access_token,
-    refresh_token: data.refresh_token,
-    expiry_date: data.expiry ? new Date(data.expiry).getTime() : undefined,
+    access_token: row[0],
+    refresh_token: row[1],
+    expiry_date: row[2] ? parseInt(row[2]) : undefined,
   });
 
   oauth2Client.on("tokens", async (tokens) => {
-    await supabase
-      .from("gmail_tokens")
-      .update({
-        access_token: tokens.access_token,
-        expiry: tokens.expiry_date
-          ? new Date(tokens.expiry_date).toISOString()
-          : null,
-      })
-      .eq("user_id", userId);
+    const currentRes = await sheets.spreadsheets.values.get({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID!,
+      range: "Tokens!A1:C1",
+    });
+    const current = currentRes.data.values?.[0] || ["", "", ""];
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID!,
+      range: "Tokens!A1:C1",
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [[
+          tokens.access_token || current[0],
+          tokens.refresh_token || current[1],
+          tokens.expiry_date?.toString() || current[2],
+        ]],
+      },
+    });
   });
 
   return google.gmail({ version: "v1", auth: oauth2Client });

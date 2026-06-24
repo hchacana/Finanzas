@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 import { getGmailClient } from "@/lib/gmail";
 import { parseCompraEmail } from "@/lib/parseCompraEmail";
-import { supabase } from "@/lib/supabase";
+import { appendTransaction, getTransactions, ensureHeaders } from "@/lib/sheets";
 
 export async function POST() {
   try {
-    const userId = "default";
-    const gmail = await getGmailClient(userId);
+    const gmail = await getGmailClient();
 
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -19,9 +18,15 @@ export async function POST() {
     });
 
     const messages = res.data.messages || [];
+    const existing = await getTransactions();
+    const existingIds = new Set(existing.map((t) => t.id));
+
+    await ensureHeaders();
     let inserted = 0;
 
     for (const msg of messages) {
+      if (existingIds.has(msg.id!)) continue;
+
       const full = await gmail.users.messages.get({
         userId: "me",
         id: msg.id!,
@@ -34,13 +39,9 @@ export async function POST() {
       if (payload?.body?.data) {
         body = Buffer.from(payload.body.data, "base64").toString("utf-8");
       } else if (payload?.parts) {
-        const htmlPart = payload.parts.find(
-          (p) => p.mimeType === "text/html"
-        );
-        const textPart = payload.parts.find(
-          (p) => p.mimeType === "text/plain"
-        );
-        const part = htmlPart || textPart;
+        const part =
+          payload.parts.find((p) => p.mimeType === "text/html") ||
+          payload.parts.find((p) => p.mimeType === "text/plain");
         if (part?.body?.data) {
           body = Buffer.from(part.body.data, "base64").toString("utf-8");
         }
@@ -49,19 +50,13 @@ export async function POST() {
       const parsed = parseCompraEmail(body);
       if (!parsed) continue;
 
-      const { error } = await supabase.from("transactions").upsert(
-        {
-          user_id: userId,
-          amount: parsed.amount,
-          merchant: parsed.merchant,
-          card_last4: parsed.cardLast4,
-          transaction_date: parsed.date.toISOString(),
-          email_id: msg.id!,
-        },
-        { onConflict: "email_id" }
-      );
-
-      if (!error) inserted++;
+      await appendTransaction({
+        fecha: parsed.date.toISOString(),
+        monto: parsed.amount,
+        comercio: parsed.merchant,
+        tarjeta: parsed.cardLast4,
+      });
+      inserted++;
     }
 
     return NextResponse.json({
@@ -69,8 +64,7 @@ export async function POST() {
       total_emails: messages.length,
     });
   } catch (error: unknown) {
-    const message =
-      error instanceof Error ? error.message : "Unknown error";
+    const message = error instanceof Error ? error.message : "Unknown error";
     console.error("Sync error:", error);
     return NextResponse.json({ error: message }, { status: 500 });
   }
